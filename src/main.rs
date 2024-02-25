@@ -1,4 +1,5 @@
-// Uses research and code done by MontagueM at https://github.com/MontagueM/helldivers2
+// Uses research and code done by MontagueM at https://github.com/MontagueM/helldivers2,
+// as well as from h3x3r and Xaymar at https://reshax.com/topic/507-helldivers-2-model-extraction-help
 pub mod extract;
 pub mod structs;
 
