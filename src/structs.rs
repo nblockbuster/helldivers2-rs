@@ -58,6 +58,19 @@ pub struct IdCache {
     pub bundles: HashMap<Id, Vec<MinimizedIdHeader>>
 }
 
+impl IdCache {
+    pub fn get_by_id(&self, x: Id) -> anyhow::Result<(Id, MinimizedIdHeader)> {
+        for (bundle, headers) in self.bundles.iter() {
+            for header in headers {
+                if header.id == x {
+                    return Ok((*bundle, *header));
+                }
+            }
+        }
+        Err(anyhow::anyhow!("Id not found"))
+    }
+}
+
 impl BinRead for IdCache {
     type Args<'a> = ();
 
@@ -107,7 +120,7 @@ impl BinWrite for IdCache {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[binrw(little)]
 pub struct MinimizedIdHeader {
     // #[serde(skip)]
@@ -209,10 +222,10 @@ impl BinRead for Id {
 
     fn read_options<R: std::io::Read + std::io::Seek>(
         reader: &mut R,
-        endian: binrw::Endian,
+        _endian: binrw::Endian,
         (): Self::Args<'_>,
     ) -> binrw::BinResult<Self> {
-        let id = u64::read_options(reader, endian, ())?;
+        let id = u64::read_options(reader, binrw::Endian::Big, ())?;
         Ok(Id::new(id))
     }
 }
@@ -223,10 +236,10 @@ impl BinWrite for Id {
     fn write_options<W: std::io::Write + std::io::Seek>(
         &self,
         writer: &mut W,
-        endian: binrw::Endian,
+        _endian: binrw::Endian,
         (): Self::Args<'_>,
     ) -> binrw::BinResult<()> {
-        self._id.write_options(writer, endian, ())
+        self._id.write_options(writer, binrw::Endian::Big, ())
     }
 }
 
@@ -254,8 +267,7 @@ pub struct Header {
 #[derive(Debug)]
 #[binread]
 pub struct DataType {
-    #[br(big)]
-    pub type_id: u64,
+    pub type_id: Id,
     pub data_count: u64,
     pub unk10: u32, // offset this much when reading in data file and not stream?
     pub unk14: u32,

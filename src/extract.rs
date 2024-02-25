@@ -1,5 +1,4 @@
 use super::structs::*;
-use anyhow::Result;
 use binrw::BinReaderExt;
 use std::{
     collections::HashMap,
@@ -13,7 +12,7 @@ pub fn extract_single(
     data_path: &String,
     bundle_id: &Id,
     h: &MinimizedIdHeader,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let path = Path::new(data_path).join(bundle_id.to_string());
     if !path.exists() {
         panic!("Tried to open nonexistent file {:?}", path);
@@ -41,7 +40,7 @@ pub fn extract_single(
         gpu_size = file.metadata()?.len();
         gpu_reader = Some(BufReader::new(file));
     }
-    let mut d: DataHeader = (*h).clone().into();
+    let mut d: DataHeader = (*h).into();
     if export_special(
         &mut d,
         &mut reader,
@@ -122,7 +121,7 @@ pub fn extract_files(
     data_path: &String,
     bundle_file: &String,
     select_type: Option<DataTypes>,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let path = Path::new(data_path).join(bundle_file);
     if !path.exists() {
         panic!("Tried to open nonexistent file {:?}", path);
@@ -136,7 +135,7 @@ pub fn extract_files(
     let header: Header = reader.read_le()?;
 
     let types: Vec<DataType> = read_types(&mut reader, header)?;
-    let mut types_dict: HashMap<u64, &DataType> = Default::default();
+    let mut types_dict: HashMap<Id, &DataType> = Default::default();
     for t in &types {
         types_dict.insert(t.type_id, t);
     }
@@ -163,10 +162,11 @@ pub fn extract_files(
         gpu_size = file.metadata()?.len();
         gpu_reader = Some(BufReader::new(file));
     }
-    println!("{:?}", data_headers.len());
+    // println!("{:#?}", types_dict);
 
     for i in 0..data_headers.len() {
         let d = data_headers.get_mut(i).unwrap();
+        // println!("{:#?}", d);
         d.type_enum = num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
         if select_type.is_some() && d.type_enum != select_type.unwrap() {
             continue;
@@ -179,7 +179,7 @@ pub fn extract_files(
         //     DataTypes::Model => "obj",
         //     _ => "bin",
         // };
-        let mut out_path = PathBuf::from(output_path); //.join(bundle_file);
+        let mut out_path = Path::new(output_path).join(bundle_file);
         if export_special(
             d,
             &mut reader,
@@ -544,13 +544,13 @@ fn export_model(
         for vert in mesh.vertices.iter() {
             // let vert = mh.vertices.get(i).unwrap();
             a += 1;
-            out_buf.write_all(format!("i {:?}n", a).as_bytes())?;
+            out_buf.write_all(format!("i {:?}\n", a).as_bytes())?;
             out_buf.write_all(
-                format!("v {:?} {:?} {:?}n", vert.pos.x, vert.pos.y, vert.pos.z).as_bytes(),
+                format!("v {:?} {:?} {:?}\n", vert.pos.x, vert.pos.y, vert.pos.z).as_bytes(),
             )?;
-            out_buf.write_all(format!("vt {:?} {:?}n", vert.uv.x, vert.uv.y).as_bytes())?;
+            out_buf.write_all(format!("vt {:?} {:?}\n", vert.uv.x, vert.uv.y).as_bytes())?;
             out_buf.write_all(
-                format!("vn {:?} {:?} {:?}n", vert.norm.x, vert.norm.y, vert.norm.z).as_bytes(),
+                format!("vn {:?} {:?} {:?}\n", vert.norm.x, vert.norm.y, vert.norm.z).as_bytes(),
             )?;
         }
         // part code from https://github.com/MontagueM/helldivers2
@@ -558,7 +558,7 @@ fn export_model(
         for part in part_defs {
             println!("{:#?}", part);
             out_buf
-                .write_all(format!("o {:?}_{}_{:x?}n", d.unk4c, d.unk_id, part.id).as_bytes())?;
+                .write_all(format!("o {:?}_{}_{:x?}\n", d.unk4c, d.unk_id, part.id).as_bytes())?;
 
             let mut local_indices: Vec<Vec<u64>> = Default::default();
             // for a in
@@ -602,7 +602,7 @@ fn export_model(
             for idx in local_indices {
                 out_buf.write_all(
                     format!(
-                        "f {:?}/{:?}/{:?} {:?}/{:?}/{:?} {:?}/{:?}/{:?}n",
+                        "f {:?}/{:?}/{:?} {:?}/{:?}/{:?} {:?}/{:?}/{:?}\n",
                         idx[0] + 1,
                         idx[0] + 1,
                         idx[0] + 1,
@@ -617,7 +617,7 @@ fn export_model(
                 )?;
             }
         }
-        println!("{:#?}", ml);
+        // println!("{:#?}", ml);
     }
     Ok(out_buf)
 }

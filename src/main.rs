@@ -3,12 +3,11 @@
 pub mod extract;
 pub mod structs;
 
-use anyhow::Result;
 use binrw::{BinReaderExt, BinWriterExt};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufWriter, Write},
     path::Path,
     time::Instant,
 };
@@ -56,9 +55,9 @@ pub fn main() -> anyhow::Result<()> {
         println!("Building cache...");
         let start = Instant::now();
         let cache = build_id_cache(&args.data_path)?;
-        // let mut cache_file = File::create("id_cache.json")?;
-        // let json = serde_json::to_string(&cache)?;
-        // cache_file.write_all(json.as_bytes())?;
+        let mut cache_file = File::create("id_cache.json")?;
+        let json = serde_json::to_string(&cache)?;
+        cache_file.write_all(json.as_bytes())?;
 
         let mut cache_writer = BufWriter::new(File::create("ids.cache")?);
         cache_writer.write_le(&cache)?;
@@ -70,7 +69,9 @@ pub fn main() -> anyhow::Result<()> {
             cache.bundles.values().map(|x| x.len()).sum::<usize>(),
             end.as_millis()
         );
-        return Ok(());
+        if args.build_cache {
+            return Ok(());
+        }
     }
 
     println!("Loading cache...");
@@ -89,15 +90,17 @@ pub fn main() -> anyhow::Result<()> {
 
     if args.selected_id.is_some() {
         let id = Id::from(args.selected_id.unwrap());
-        for (bundle, headers) in cache.bundles.iter() {
-            for header in headers {
-                if header.id == id {
-                    println!("id {:?} is in bundle {:?}", header.id, bundle);
-                    extract_single(&args.output_path, &args.data_path, bundle, header)?;
-                }
-            }
-        }
-        return Ok(());
+        // for (bundle, headers) in cache.bundles.iter() {
+        //     for header in headers {
+        //         if header.id == id {
+        //             println!("id {:?} is in bundle {:?}", header.id, bundle);
+        //             extract_single(&args.output_path, &args.data_path, bundle, header)?;
+        //         }
+        //     }
+        // }
+        let data = cache.get_by_id(id)?;
+        println!("id {:?} is in bundle {:?}", id, data.0);
+        return extract_single(&args.output_path, &args.data_path, &data.0, &data.1);
     }
 
     if args.extract_all {
@@ -129,7 +132,7 @@ pub fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_id_cache(data_path: &String) -> Result<IdCache> {
+fn build_id_cache(data_path: &String) -> anyhow::Result<IdCache> {
     let mut cache: IdCache = Default::default();
 
     for a in std::fs::read_dir(data_path)? {
@@ -144,7 +147,7 @@ fn build_id_cache(data_path: &String) -> Result<IdCache> {
         let header: Header = reader.read_le()?;
         let types: Vec<DataType> = read_types(&mut reader, header)?;
 
-        let mut types_dict: HashMap<u64, &DataType> = Default::default();
+        let mut types_dict: HashMap<Id, &DataType> = Default::default();
         for t in &types {
             types_dict.insert(t.type_id, t);
         }
