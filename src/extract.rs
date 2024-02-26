@@ -10,107 +10,108 @@ use std::{
 pub fn extract_single(
     output_path: &String,
     data_path: &String,
-    bundle_id: &Id,
-    h: &MinimizedIdHeader,
+    ids: Vec<(Id, MinimizedIdHeader)>
 ) -> anyhow::Result<()> {
-    let path = Path::new(data_path).join(bundle_id.to_string());
-    if !path.exists() {
-        panic!("Tried to open nonexistent file {:?}", path);
-    }
-    // println!("{:?}", path);
-    let mut reader = BufReader::new(File::open(path)?);
-    let mut out_path = PathBuf::from(output_path); //.join(bundle_file);
-
-    let mut stream_path = Path::new(&data_path).join(bundle_id.to_string());
-    stream_path.set_extension("stream");
-    let mut stream_reader: Option<BufReader<File>> = None;
-    let mut stream_size = 0;
-    if stream_path.exists() {
-        let file = File::open(stream_path.clone())?;
-        stream_size = file.metadata()?.len();
-        stream_reader = Some(BufReader::new(file));
-    }
-
-    let mut gpu_path = Path::new(&data_path).join(bundle_id.to_string());
-    gpu_path.set_extension("gpu_resources");
-    let mut gpu_reader: Option<BufReader<File>> = None;
-    let mut gpu_size = 0;
-    if gpu_path.exists() {
-        let file = File::open(gpu_path.clone())?;
-        gpu_size = file.metadata()?.len();
-        gpu_reader = Some(BufReader::new(file));
-    }
-    let mut d: DataHeader = (*h).into();
-    if export_special(
-        &mut d,
-        &mut reader,
-        &mut stream_reader,
-        &mut gpu_reader,
-        &out_path,
-    )? {
-        return Ok(());
-    }
-
-    let mut bundle_buf: Vec<u8> = Vec::new();
-    let mut stream_buf: Vec<u8> = Vec::new();
-    let mut gpu_buf: Vec<u8> = Vec::new();
-    if h.data_size != 0 {
-        bundle_buf = vec![0u8; h.data_size as usize];
-        reader.seek(SeekFrom::Start(h.data_offset))?;
-        reader.read_exact(&mut bundle_buf)?;
-    }
-    if h.stream_data_size != 0 && u64::from(h.stream_data_offset) < stream_size {
-        stream_buf = vec![0u8; h.stream_data_size as usize];
-        if stream_reader.is_none() {
-            panic!(
-                "Stream file referenced but {:?} not found.",
-                stream_path.clone()
-            );
+    for (bundle_id, h) in ids.iter() {
+        let path = Path::new(data_path).join(bundle_id.to_string());
+        if !path.exists() {
+            return Err(anyhow::anyhow!("tried to open nonexistent file {:?}", path));
         }
-        if let Some(ref mut sf_reader) = stream_reader {
-            sf_reader.seek(SeekFrom::Start(h.stream_data_offset as u64))?;
-            sf_reader.read_exact(&mut stream_buf)?;
+        // println!("{:?}", path);
+        let mut reader = BufReader::new(File::open(path)?);
+        let mut out_path = PathBuf::from(output_path); //.join(bundle_file);
+    
+        let mut stream_path = Path::new(&data_path).join(bundle_id.to_string());
+        stream_path.set_extension("stream");
+        let mut stream_reader: Option<BufReader<File>> = None;
+        let mut stream_size = 0;
+        if stream_path.exists() {
+            let file = File::open(stream_path.clone())?;
+            stream_size = file.metadata()?.len();
+            stream_reader = Some(BufReader::new(file));
         }
-    }
-    if h.gpu_data_size != 0 && h.gpu_data_offset < gpu_size {
-        gpu_buf = vec![0u8; h.gpu_data_size as usize];
-        if gpu_reader.is_none() {
-            panic!(
-                "GPU Resources referenced but {:?} not founh.",
-                gpu_path.clone()
-            );
+    
+        let mut gpu_path = Path::new(&data_path).join(bundle_id.to_string());
+        gpu_path.set_extension("gpu_resources");
+        let mut gpu_reader: Option<BufReader<File>> = None;
+        let mut gpu_size = 0;
+        if gpu_path.exists() {
+            let file = File::open(gpu_path.clone())?;
+            gpu_size = file.metadata()?.len();
+            gpu_reader = Some(BufReader::new(file));
         }
-        if let Some(ref mut gpu_reader) = gpu_reader {
-            gpu_reader.seek(SeekFrom::Start(h.gpu_data_size as u64))?;
-            gpu_reader.read_exact(&mut gpu_buf)?;
+        let mut d: DataHeader = (*h).into();
+        if export_special(
+            &mut d,
+            &mut reader,
+            &mut stream_reader,
+            &mut gpu_reader,
+            &out_path,
+        )? {
+            return Ok(());
         }
-    }
-
-    let enum_type: DataTypes = num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
-    let type_folder = format!("{:?}_{:x?}", enum_type, d.type_id);
-    out_path = out_path.join(type_folder);
-    if !out_path.exists() {
-        let _ = std::fs::create_dir_all(&out_path);
-    }
-    out_path = out_path.join(format!("{}_{}", d.unk4c, d.unk_id));
-
-    if !bundle_buf.is_empty() {
-        let mut bundle = out_path.clone();
-        bundle.set_extension("bundle.".to_owned() + d.type_enum.extension());
-        let mut out_file = File::create(bundle)?;
-        out_file.write_all(&bundle_buf)?;
-    }
-    if !stream_buf.is_empty() {
-        let mut stream = out_path.clone();
-        stream.set_extension("stream.".to_owned() + d.type_enum.extension());
-        let mut out_file = BufWriter::new(File::create(stream)?);
-        out_file.write_all(&stream_buf)?;
-    }
-    if !gpu_buf.is_empty() {
-        let mut gpu = out_path.clone();
-        gpu.set_extension("gpu.".to_owned() + d.type_enum.extension());
-        let mut out_file = File::create(gpu)?;
-        out_file.write_all(&gpu_buf)?;
+    
+        let mut bundle_buf: Vec<u8> = Vec::new();
+        let mut stream_buf: Vec<u8> = Vec::new();
+        let mut gpu_buf: Vec<u8> = Vec::new();
+        if h.data_size != 0 {
+            bundle_buf = vec![0u8; h.data_size as usize];
+            reader.seek(SeekFrom::Start(h.data_offset))?;
+            reader.read_exact(&mut bundle_buf)?;
+        }
+        if h.stream_data_size != 0 && u64::from(h.stream_data_offset) < stream_size {
+            stream_buf = vec![0u8; h.stream_data_size as usize];
+            if stream_reader.is_none() {
+                panic!(
+                    "Stream file referenced but {:?} not found.",
+                    stream_path.clone()
+                );
+            }
+            if let Some(ref mut sf_reader) = stream_reader {
+                sf_reader.seek(SeekFrom::Start(h.stream_data_offset as u64))?;
+                sf_reader.read_exact(&mut stream_buf)?;
+            }
+        }
+        if h.gpu_data_size != 0 && h.gpu_data_offset < gpu_size {
+            gpu_buf = vec![0u8; h.gpu_data_size as usize];
+            if gpu_reader.is_none() {
+                panic!(
+                    "GPU Resources referenced but {:?} not founh.",
+                    gpu_path.clone()
+                );
+            }
+            if let Some(ref mut gpu_reader) = gpu_reader {
+                gpu_reader.seek(SeekFrom::Start(h.gpu_data_size as u64))?;
+                gpu_reader.read_exact(&mut gpu_buf)?;
+            }
+        }
+    
+        let enum_type: DataTypes = num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
+        let type_folder = format!("{:?}_{:x?}", enum_type, d.type_id);
+        out_path = out_path.join(type_folder);
+        if !out_path.exists() {
+            let _ = std::fs::create_dir_all(&out_path);
+        }
+        out_path = out_path.join(format!("{}_{}", d.unk4c, d.unk_id));
+    
+        if !bundle_buf.is_empty() {
+            let mut bundle = out_path.clone();
+            bundle.set_extension("bundle.".to_owned() + d.type_enum.extension());
+            let mut out_file = File::create(bundle)?;
+            out_file.write_all(&bundle_buf)?;
+        }
+        if !stream_buf.is_empty() {
+            let mut stream = out_path.clone();
+            stream.set_extension("stream.".to_owned() + d.type_enum.extension());
+            let mut out_file = BufWriter::new(File::create(stream)?);
+            out_file.write_all(&stream_buf)?;
+        }
+        if !gpu_buf.is_empty() {
+            let mut gpu = out_path.clone();
+            gpu.set_extension("gpu.".to_owned() + d.type_enum.extension());
+            let mut out_file = File::create(gpu)?;
+            out_file.write_all(&gpu_buf)?;
+        }
     }
 
     Ok(())
@@ -166,7 +167,7 @@ pub fn extract_files(
 
     for i in 0..data_headers.len() {
         let d = data_headers.get_mut(i).unwrap();
-        // println!("{:#?}", d);
+        println!("{:#?}", d.unk_id);
         d.type_enum = num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
         if select_type.is_some() && d.type_enum != select_type.unwrap() {
             continue;
@@ -195,7 +196,7 @@ pub fn extract_files(
         let mut gpu_buf: Vec<u8> = Vec::new();
         if d.data_size != 0 {
             bundle_buf = vec![0u8; d.data_size as usize];
-            let seek_pos = d.data_offset + types_dict.get(&d.type_id.into()).unwrap().unk10 as u64;
+            let seek_pos = d.data_offset + types_dict.get(&d.type_id).unwrap().unk10 as u64;
             if seek_pos + d.data_offset >= bundle_size {
                 continue;
             }
@@ -415,9 +416,10 @@ fn export_model(
         mr.seek(SeekFrom::Start(off.into()))?;
 
         let ml: MeshLod = mr.read_le()?;
+        println!("{:#?}", ml);
 
-        let size = ml.vtx_count * ml.stride as u32;
-        let mut data = vec![0u8; size as usize];
+        // let size = ml.vtx_count * ml.stride as u32;
+        let mut data = vec![0u8; ml.vtx_size as usize];
         if gf.is_none() {
             panic!("GPU Resource file referenced but not found.");
         }
@@ -433,36 +435,36 @@ fn export_model(
             match ml.stride {
                 16 => {
                     let pos: Vector3 = gr.read_le()?;
-                    let uv: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                 }
                 20 => {
                     let pos: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
-                    let uv: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                     // vpos.push(pos);
                     // vt.push(uv);
                 }
                 24 => {
                     let pos: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
-                    let uv: UShortVector2 = gr.read_le()?;
-                    let _uv2: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
+                    let _uv2: HalfVector2 = gr.read_le()?;
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                     // vpos.push(pos);
                     // vt.push(uv);
                 }
                 28 => {
                     let pos: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
-                    let uv: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
                     // this just has a single float?
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                     // vpos.push(pos);
                     // vt.push(uv);
                     gr.seek_relative(0x8)?;
@@ -470,19 +472,19 @@ fn export_model(
                 32 => {
                     gr.seek_relative(0x4)?;
                     let pos: Vector3 = gr.read_le()?;
-                    let uv: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
                     let norm: Vector3 = gr.read_le()?;
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                     vtx.norm = norm;
                 }
                 36 => {
                     let pos: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
-                    let uv: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
                     let norm: Vector3 = gr.read_le()?;
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                     vtx.norm = norm;
                     gr.seek_relative(0x4)?;
                 }
@@ -490,24 +492,33 @@ fn export_model(
                     gr.seek_relative(0x4)?;
                     let pos: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
-                    let uv: UShortVector2 = gr.read_le()?;
+                    let uv: HalfVector2 = gr.read_le()?;
                     let norm: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
                     vtx.pos = pos;
-                    vtx.uv = uv;
+                    vtx.uv = uv.into();
                     vtx.norm = norm;
+                }
+                48 => {
+                    let pos: Vector3 = gr.read_le()?;
+                    gr.seek_relative(0x4)?;
+                    let uv: Vector2 = gr.read_le()?;
+                    gr.seek_relative(0x18)?;
+                    vtx.pos = pos;
+                    vtx.uv = uv;
                 }
                 60 => {
                     let pos: Vector3 = gr.read_le()?;
                     gr.seek_relative(0x4)?;
-                    let uv: UShortVector2 = gr.read_le()?;
-                    let _uv2: UShortVector2 = gr.read_le()?;
-                    let _uv3: UShortVector2 = gr.read_le()?;
-                    let norm: UShortVector3 = gr.read_le()?; // todo: re-check this
+                    let uv: HalfVector2 = gr.read_le()?;
+                    // todo: re-check these
+                    let _uv2: HalfVector2 = gr.read_le()?;
+                    let _col: HalfVector3 = gr.read_le()?; // actually vertex color, where the fuck are normals???
                     vtx.pos = pos;
-                    vtx.uv = uv;
-                    vtx.norm = norm.into();
-                    gr.seek_relative(0x26)?;
+                    vtx.uv = uv.into();
+                    // vtx.norm = norm.into();
+                    // vtx.col = col.into();
+                    gr.seek_relative(0x1E)?;
                 }
                 _ => {}
             }
@@ -556,7 +567,7 @@ fn export_model(
         // part code from https://github.com/MontagueM/helldivers2
         // dont know if its functioning for everything yet, helmet model is messed up (8C12FFEFB4D020BC)
         for part in part_defs {
-            println!("{:#?}", part);
+            // println!("{:#?}", part);
             out_buf
                 .write_all(format!("o {:?}_{}_{:x?}\n", d.unk4c, d.unk_id, part.id).as_bytes())?;
 
@@ -617,7 +628,6 @@ fn export_model(
                 )?;
             }
         }
-        // println!("{:#?}", ml);
     }
     Ok(out_buf)
 }

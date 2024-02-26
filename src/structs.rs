@@ -2,6 +2,7 @@ use std::{collections::HashMap, f32::consts::PI, io::SeekFrom};
 
 use binrw::{binread, binrw, BinRead, BinWrite};
 use serde::{Deserialize, Serialize};
+use half::f16;
 
 #[derive(clap::ValueEnum, BinRead, Debug, Default, FromPrimitive, ToPrimitive, PartialEq, Clone, Copy)]
 #[br(repr = u64)]
@@ -29,7 +30,7 @@ pub enum DataTypes {
     #[value(name = "model")]
     Model = 0x3f45a7e9_0b8da4e0,
 
-    #[value(name = "string")]
+    // #[value(name = "string")]
     String = 0xd30fb410_ab2b970d,
 
     #[value(name = "entity")]
@@ -37,6 +38,8 @@ pub enum DataTypes {
 
     #[value(name = "material")]
     Material = 0xDFDE6A87_97B4C0EA,
+
+    Skeleton = 0xe9726b05_01adde18,
 }
 
 impl DataTypes {
@@ -59,15 +62,16 @@ pub struct IdCache {
 }
 
 impl IdCache {
-    pub fn get_by_id(&self, x: Id) -> anyhow::Result<(Id, MinimizedIdHeader)> {
+    pub fn get_by_id(&self, x: Id) -> anyhow::Result<Vec<(Id, MinimizedIdHeader)>> {
+        let mut ids = Vec::new();
         for (bundle, headers) in self.bundles.iter() {
             for header in headers {
                 if header.id == x {
-                    return Ok((*bundle, *header));
+                    ids.push((*bundle, *header));
                 }
             }
         }
-        Err(anyhow::anyhow!("Id not found"))
+        Ok(ids)
     }
 }
 
@@ -153,6 +157,9 @@ impl Id {
             _id: id
         }
     }
+    pub fn as_enum(&self) -> DataTypes {
+        return num::FromPrimitive::from_u64(self._id).unwrap_or(DataTypes::Unknown);
+    }
 }
 
 impl From<u64> for Id {
@@ -169,7 +176,7 @@ impl From<Id> for u64 {
 
 impl From<Id> for String {
     fn from(id: Id) -> Self {
-        format!("{:x}", id._id)
+        format!("{:016x}", id._id)
     }
 }
 
@@ -187,13 +194,13 @@ impl From<String> for Id {
 
 impl std::fmt::Debug for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", &self._id)
+        write!(f, "{:016x}", &self._id)
     }
 }
 
 impl std::fmt::Display for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", &self._id)
+        write!(f, "{:016x}", &self._id)
     }
 }
 
@@ -306,6 +313,7 @@ impl From<MinimizedIdHeader> for DataHeader {
             data_size: header.data_size,
             stream_data_size: header.stream_data_size,
             gpu_data_size: header.gpu_data_size,
+            type_enum: header.type_id.as_enum(),
             ..Default::default()
         }
     }
@@ -382,8 +390,9 @@ pub struct MeshLod {
 #[derive(Debug, Default)]
 pub struct Vertex {
     pub pos: Vector3,
-    pub uv: UShortVector2,
+    pub uv: Vector2,
     pub norm: Vector3,
+    pub col: Vector3
 }
 
 #[repr(C)]
@@ -398,11 +407,8 @@ pub struct UShortVector2 {
 #[repr(C)]
 #[derive(BinRead, Copy, Clone, Debug, Default)]
 pub struct UShortVector3 {
-    // #[br(map = |x: u16| f32::from(x)/65535.0f32)]
     pub x: u16,
-    // #[br(map = |y: u16| f32::from(y)/65535.0f32)]
     pub y: u16,
-    // #[br(map = |z: u16| f32::from(z)/65535.0f32)]
     pub z: u16,
 }
 
@@ -418,10 +424,56 @@ impl From<UShortVector3> for Vector3 {
 
 #[repr(C)]
 #[derive(BinRead, Copy, Clone, Debug, Default)]
+pub struct HalfVector2 {
+    #[br(map = |x: u16| f16::from_bits(x))]
+    pub x: f16,
+    #[br(map = |x: u16| f16::from_bits(x))]
+    pub y: f16,
+}
+
+#[repr(C)]
+#[derive(BinRead, Copy, Clone, Debug, Default)]
+pub struct Vector2 {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl From<HalfVector2> for Vector2 {
+    fn from(v: HalfVector2) -> Self {
+        Vector2 {
+            x: f32::from(v.x),
+            y: f32::from(v.y),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(BinRead, Copy, Clone, Debug, Default)]
+pub struct HalfVector3 {
+    #[br(map = |x: u16| f16::from_bits(x))]
+    pub x: f16,
+    #[br(map = |x: u16| f16::from_bits(x))]
+    pub y: f16,
+    #[br(map = |x: u16| f16::from_bits(x))]
+    pub z: f16,
+}
+
+#[repr(C)]
+#[derive(BinRead, Copy, Clone, Debug, Default)]
 pub struct Vector3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+}
+
+impl From<HalfVector3> for Vector3 {
+    fn from(v: HalfVector3) -> Self {
+        Vector3 {
+            x: f32::from(v.x),
+            y: f32::from(v.y),
+            z: f32::from(v.z),
+        }
+    }
 }
 
 #[repr(C)]

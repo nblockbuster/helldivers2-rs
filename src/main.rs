@@ -43,8 +43,7 @@ struct Args {
     #[arg(short, value_enum)]
     filetype: Option<DataTypes>,
 
-    /// Single ID to search for
-    /// ex: 900393cd28064f12
+    /// Extract all files with x ID
     #[arg(short, value_enum)]
     selected_id: Option<String>,
 }
@@ -99,8 +98,8 @@ pub fn main() -> anyhow::Result<()> {
         //     }
         // }
         let data = cache.get_by_id(id)?;
-        println!("id {:?} is in bundle {:?}", id, data.0);
-        return extract_single(&args.output_path, &args.data_path, &data.0, &data.1);
+        // println!("id {:?} is in bundle {:?}", id, data.0);
+        return extract_single(&args.output_path, &args.data_path, data);
     }
 
     if args.extract_all {
