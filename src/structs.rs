@@ -1,10 +1,17 @@
-use std::{collections::HashMap, f32::consts::PI, io::SeekFrom};
-
+use anyhow::Result;
 use binrw::{binread, binrw, BinRead, BinWrite};
-use serde::{Deserialize, Serialize};
 use half::f16;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    f32::consts::PI,
+    fs::File,
+    io::{BufReader, Read, Seek, SeekFrom},
+};
 
-#[derive(clap::ValueEnum, BinRead, Debug, Default, FromPrimitive, ToPrimitive, PartialEq, Clone, Copy)]
+#[derive(
+    clap::ValueEnum, BinRead, Debug, Default, FromPrimitive, ToPrimitive, PartialEq, Clone, Copy,
+)]
 #[br(repr = u64)]
 #[repr(u64)]
 pub enum DataTypes {
@@ -47,31 +54,30 @@ impl DataTypes {
         match self {
             DataTypes::WwiseWem => "wem",
             DataTypes::WwiseBNK => "bnk",
-            DataTypes::Havok |
-            DataTypes::Havok2 => "hkt",
+            DataTypes::Havok | DataTypes::Havok2 => "hkt",
             DataTypes::Texture => "dds",
             DataTypes::Model => "obj",
-            _ => "bin"
+            _ => "bin",
         }
     }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IdCache {
-    pub bundles: HashMap<Id, Vec<MinimizedIdHeader>>
+    pub bundles: HashMap<Id, Vec<MinimizedIdHeader>>,
 }
 
 impl IdCache {
-    pub fn get_by_id(&self, x: Id) -> anyhow::Result<Vec<(Id, MinimizedIdHeader)>> {
-        let mut ids = Vec::new();
+    pub fn get_by_id(&self, x: Id) -> anyhow::Result<(Id, MinimizedIdHeader)> {
+        // let mut ids = Vec::new();
         for (bundle, headers) in self.bundles.iter() {
             for header in headers {
                 if header.id == x {
-                    ids.push((*bundle, *header));
+                    return Ok((*bundle, *header));
                 }
             }
         }
-        Ok(ids)
+        Err(anyhow::anyhow!("id {} not found in cache", x))
     }
 }
 
@@ -93,11 +99,10 @@ impl BinRead for IdCache {
                 let header = MinimizedIdHeader::read_options(reader, endian, ())?;
                 headers.push(header);
             }
+            //headers.dedup_by(|a, b| a.id == b.id && a.type_id == b.type_id);
             bundles.insert(id, headers);
         }
-        Ok(IdCache {
-            bundles
-        })
+        Ok(IdCache { bundles })
     }
 }
 
@@ -148,17 +153,18 @@ pub struct MinimizedIdHeader {
 // u64, binrw reads as u64, serde reads as string, both output to string (binrw: hex u64, serde: string)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Id {
-    _id: u64
+    _id: u64,
 }
 
 impl Id {
     pub fn new(id: u64) -> Self {
-        Id {
-            _id: id
-        }
+        Id { _id: id }
     }
     pub fn as_enum(&self) -> DataTypes {
-        return num::FromPrimitive::from_u64(self._id).unwrap_or(DataTypes::Unknown);
+        num::FromPrimitive::from_u64(self._id).unwrap_or(DataTypes::Unknown)
+    }
+    pub fn invalid() -> Self {
+        Id { _id: u64::MAX }
     }
 }
 
@@ -207,16 +213,16 @@ impl std::fmt::Display for Id {
 impl serde::Serialize for Id {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer
+        S: serde::Serializer,
     {
-        serializer.serialize_str(&format!("{:x}", &self._id))
+        serializer.serialize_str(&format!("{:016x}", &self._id))
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Id {
     fn deserialize<D>(deserializer: D) -> Result<Id, D::Error>
     where
-        D: serde::Deserializer<'de>
+        D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         let id = u64::from_str_radix(&s, 16).unwrap();
@@ -302,6 +308,35 @@ pub struct DataHeader {
     pub type_enum: DataTypes,
 }
 
+impl DataHeader {
+    pub fn get_stream_buf(&self, r: &mut Option<BufReader<File>>) -> Result<Vec<u8>> {
+        if self.stream_data_size == 0 {
+            return Err(anyhow::anyhow!("stream data size 0"));
+        }
+        let mut buf = vec![0u8; self.stream_data_size as usize];
+        if r.is_none() {
+            panic!("Stream file referenced but not found.");
+        }
+        if let Some(ref mut reader) = r {
+            reader.seek(SeekFrom::Start(self.stream_data_offset as u64))?;
+            reader.read_exact(&mut buf)?;
+        }
+
+        Ok(buf)
+    }
+
+    pub fn get_bundle_buf(&self, r: &mut BufReader<File>) -> Result<Vec<u8>> {
+        if self.data_size == 0 {
+            return Err(anyhow::anyhow!("bundle data size 0"));
+        }
+        let mut buf = vec![0u8; self.data_size as usize - 0x10];
+        r.seek(SeekFrom::Start(self.data_offset + 0x10))?;
+        r.read_exact(&mut buf)?;
+
+        Ok(buf)
+    }
+}
+
 impl From<MinimizedIdHeader> for DataHeader {
     fn from(header: MinimizedIdHeader) -> Self {
         DataHeader {
@@ -319,14 +354,43 @@ impl From<MinimizedIdHeader> for DataHeader {
     }
 }
 
+// workaround for E0117
+#[derive(Debug, Default)]
+pub struct U32IdMap(HashMap<u32, Id>);
+
+impl U32IdMap {
+    pub fn get(&self, k: &u32) -> Option<&Id> {
+        self.0.get(k)
+    }
+}
+
+impl BinRead for U32IdMap {
+    type Args<'a> = ();
+
+    fn read_options<R: std::io::Read + std::io::Seek>(
+        reader: &mut R,
+        endian: binrw::Endian,
+        (): Self::Args<'_>,
+    ) -> binrw::BinResult<Self> {
+        let mut materials = HashMap::new();
+        let material_count = u32::read_options(reader, endian, ())?;
+        for _ in 0..material_count {
+            let id = Id::read_options(reader, endian, ())?;
+            let index = u32::read_options(reader, endian, ())?;
+            materials.insert(index, id);
+        }
+        Ok(Self(materials))
+    }
+}
+
 #[derive(BinRead, Debug, Default)]
-pub struct ModelHeader {
+pub struct UnitHeader {
     #[br(seek_before = SeekFrom::Start(0x5C))]
     pub lod_offset: u32,
     #[br(seek_before = SeekFrom::Start(lod_offset.into()))]
     pub lod_count: u32,
 
-    #[br(count = lod_count)]//, seek_before = SeekFrom::Start(lod_offset as u64 +4))]
+    #[br(count = lod_count)] //, seek_before = SeekFrom::Start(lod_offset as u64 +4))]
     pub offsets: Vec<u32>,
 
     // #[br(seek_before = SeekFrom::Start(0x70))]
@@ -338,13 +402,14 @@ pub struct ModelHeader {
     // #[br(count = part_count)]
     // #[br(ignore)]
     // pub part_indices: Vec<u32>,
-}
+    #[br(seek_before = SeekFrom::Start(0x64))]
+    pub material_offset: u32,
+    // pub material_count: u32,
 
-// #[derive(BinRead, Debug, Default)]
-// pub struct PartHeader {
-//     #[br(seek_before = SeekFrom::Current(0x3C), pad_after = 0x28)]
-//     pub mesh_index: i32,
-// }
+    // #[br(ignore)]
+    #[br(seek_before = SeekFrom::Start(material_offset.into()))]
+    pub materials: U32IdMap,
+}
 
 #[derive(Default)]
 pub struct Mesh {
@@ -371,7 +436,7 @@ pub struct PartDef {
 pub struct Part {
     pub id: u32,
     pub def: PartDef,
-    pub material_id: u64,
+    pub material_id: Id,
 }
 
 #[derive(BinRead, Debug)]
@@ -392,7 +457,7 @@ pub struct Vertex {
     pub pos: Vector3,
     pub uv: Vector2,
     pub norm: Vector3,
-    pub col: Vector3
+    pub col: Vector3,
 }
 
 #[repr(C)]
@@ -449,6 +514,17 @@ impl From<HalfVector2> for Vector2 {
 
 #[repr(C)]
 #[derive(BinRead, Copy, Clone, Debug, Default)]
+pub struct U8Vector3 {
+    #[br(map = |x: u8| f32::from(x)/255.0)]
+    pub x: f32,
+    #[br(map = |x: u8| f32::from(x)/255.0)]
+    pub y: f32,
+    #[br(map = |x: u8| f32::from(x)/255.0)]
+    pub z: f32,
+}
+
+#[repr(C)]
+#[derive(BinRead, Copy, Clone, Debug, Default)]
 pub struct HalfVector3 {
     #[br(map = |x: u16| f16::from_bits(x))]
     pub x: f16,
@@ -482,9 +558,8 @@ pub struct Vector4 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    pub w: f32
+    pub w: f32,
 }
-
 
 impl Vector4 {
     pub fn magnitude(s: &Self) -> f32 {
@@ -504,9 +579,7 @@ impl Vector4 {
             let abs_sinp = sinp.abs();
             if abs_sinp >= 1.0 {
                 res.y = 90.0; // use 90 degrees if out of range
-            }
-            else
-            {
+            } else {
                 res.y = sinp.asin();
             }
 
@@ -518,12 +591,12 @@ impl Vector4 {
             // Rad to Deg
             res.x *= 180.0 / PI;
 
-            if abs_sinp < 1.0 { // only mult if within range
+            if abs_sinp < 1.0 {
+                // only mult if within range
                 res.y *= 180.0 / PI;
             }
             res.z *= 180.0 / PI;
-        }
-        else {
+        } else {
             res.x = s.x;
             res.y = s.y;
             res.z = s.z;

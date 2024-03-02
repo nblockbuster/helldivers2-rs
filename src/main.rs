@@ -1,7 +1,9 @@
+#![deny(clippy::correctness, clippy::suspicious, clippy::complexity)]
 // Uses research and code done by MontagueM at https://github.com/MontagueM/helldivers2,
 // as well as from h3x3r and Xaymar at https://reshax.com/topic/507-helldivers-2-model-extraction-help
 pub mod extract;
 pub mod structs;
+pub mod types;
 
 use binrw::{BinReaderExt, BinWriterExt};
 use std::{
@@ -31,9 +33,13 @@ struct Args {
     /// Selected bundle file
     bundle_file: Option<String>,
 
-    /// Extract from all
+    /// Extract from all bundles
     #[arg(short, long)]
     extract_all: bool,
+
+    /// Extracts everyting into one folder (still separated by type)
+    #[arg(short, long)]
+    one_folder: bool,
 
     /// Rebuilds the ID cache
     #[arg(short, long)]
@@ -88,7 +94,6 @@ pub fn main() -> anyhow::Result<()> {
     );
 
     if args.selected_id.is_some() {
-        let id = Id::from(args.selected_id.unwrap());
         // for (bundle, headers) in cache.bundles.iter() {
         //     for header in headers {
         //         if header.id == id {
@@ -97,9 +102,8 @@ pub fn main() -> anyhow::Result<()> {
         //         }
         //     }
         // }
-        let data = cache.get_by_id(id)?;
         // println!("id {:?} is in bundle {:?}", id, data.0);
-        return extract_single(&args.output_path, &args.data_path, data);
+        return extract_single(&cache, &args.output_path, &args.data_path, Id::from(args.selected_id.unwrap()));
     }
 
     if args.extract_all {
@@ -110,10 +114,12 @@ pub fn main() -> anyhow::Result<()> {
                 continue;
             }
             extract_files(
+                &cache,
                 &args.output_path,
                 &args.data_path,
                 &bundle_name.to_string(),
                 args.filetype,
+                args.one_folder
             )?;
         }
         return Ok(());
@@ -122,10 +128,12 @@ pub fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     extract_files(
+        &cache,
         &args.output_path,
         &args.data_path,
         &args.bundle_file.unwrap(),
         args.filetype,
+        args.one_folder
     )?;
 
     Ok(())
