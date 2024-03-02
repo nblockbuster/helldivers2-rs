@@ -329,8 +329,8 @@ impl DataHeader {
         if self.data_size == 0 {
             return Err(anyhow::anyhow!("bundle data size 0"));
         }
-        let mut buf = vec![0u8; self.data_size as usize - 0x10];
-        r.seek(SeekFrom::Start(self.data_offset + 0x10))?;
+        let mut buf = vec![0u8; self.data_size as usize];
+        r.seek(SeekFrom::Start(self.data_offset))?;
         r.read_exact(&mut buf)?;
 
         Ok(buf)

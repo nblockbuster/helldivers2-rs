@@ -309,28 +309,24 @@ pub fn export_special(
     gf: &mut Option<BufReader<File>>,
     out_path: &Path,
 ) -> anyhow::Result<bool> {
-    let mut out_buf: Vec<u8> = Vec::new();
-    match d.type_enum {
-        DataTypes::Texture => {
-            out_buf = export_texture(d, r, sf, gf)?;
-        }
-        DataTypes::Model => {
-            out_buf = export_model(cache, d, r, gf)?;
-        }
-        DataTypes::WwiseBNK => {
-            out_buf = crate::types::wwise::extract_bank(d, r, sf)?;
-        }
+    let (out_buf, file_name) = match d.type_enum {
+        DataTypes::Texture => export_texture(d, r, sf, gf)?,
+        DataTypes::Model => export_model(cache, d, r, gf)?,
+        DataTypes::WwiseBNK => crate::types::wwise::extract_bank(d, r, sf)?,
+        DataTypes::WwiseWem => crate::types::wwise::extract_wem(d, r, sf)?,
         _ => {
             return Ok(false);
         }
-    }
+    };
 
     let enum_type: DataTypes = num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
     let mut out_path = out_path.join(format!("{:?}", enum_type));
     if !out_path.exists() {
         let _ = std::fs::create_dir_all(&out_path);
     }
-    out_path = out_path.join(format!("{}_{}", d.unk4c, d.unk_id));
+    // out_path = out_path.join(format!("{}_{}", d.unk4c, d.unk_id));
+    let name = if let Some(file_name) = file_name {file_name} else {format!("{}_{}", d.unk4c, d.unk_id) };
+    out_path = out_path.join(name);
     out_path.set_extension(d.type_enum.extension());
 
     let mut out_file = File::create(out_path)?;
@@ -344,7 +340,7 @@ fn export_texture(
     r: &mut BufReader<File>,
     sf: &mut Option<BufReader<File>>,
     gf: &mut Option<BufReader<File>>,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<(Vec<u8>, Option<String>), anyhow::Error> {
     let mut out_buf: Vec<u8> = Vec::new();
     r.seek(SeekFrom::Start(d.data_offset + 0xc0))?;
     let mut dds_header = vec![0u8; 0x94];
@@ -373,7 +369,7 @@ fn export_texture(
             out_buf.extend_from_slice(&data);
         }
     }
-    Ok(out_buf)
+    Ok((out_buf, None))
 }
 
 fn export_model(
@@ -381,7 +377,7 @@ fn export_model(
     d: &mut DataHeader,
     r: &mut BufReader<File>,
     gf: &mut Option<BufReader<File>>,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<(Vec<u8>, Option<String>), anyhow::Error> {
     let mut out_buf: Vec<u8> = Vec::new();
     r.seek(SeekFrom::Start(d.data_offset))?;
     let mut data = vec![0u8; d.data_size.try_into().unwrap()];
@@ -446,6 +442,7 @@ fn export_model(
             let mut vtx: Vertex = Default::default();
             // let mut vpos = Vec::new();
             // let mut vt = Vec::new();
+            // TODO: this is no good and bad. figure out what Diver does (something like Hellextractor's method?)
             match ml.stride {
                 16 => {
                     let pos: Vector3 = gr.read_le()?;
@@ -656,5 +653,5 @@ fn export_model(
         //     }
         // }
     }
-    Ok(out_buf)
+    Ok((out_buf, None))
 }
