@@ -1,10 +1,8 @@
 use anyhow::Result;
 use binrw::{binread, binrw, BinRead, BinWrite};
-use half::f16;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    f32::consts::PI,
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom},
 };
@@ -47,10 +45,12 @@ pub enum DataTypes {
     Material = 0xDFDE6A87_97B4C0EA,
 
     Skeleton = 0xe9726b05_01adde18,
+
+    AudioPath = 0x70B0F282_5C0932AF,
 }
 
 impl DataTypes {
-    pub fn extension(self) -> &'static str {
+    pub fn extension(&self) -> &'static str {
         match self {
             DataTypes::WwiseWem => "wem",
             DataTypes::WwiseBNK => "bnk",
@@ -60,6 +60,10 @@ impl DataTypes {
             _ => "bin",
         }
     }
+
+    pub fn as_id(&self) -> Id {
+        Id::from(num::ToPrimitive::to_u64(self).unwrap())
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -68,11 +72,33 @@ pub struct IdCache {
 }
 
 impl IdCache {
-    pub fn get_by_id(&self, x: Id) -> anyhow::Result<(Id, MinimizedIdHeader)> {
-        // let mut ids = Vec::new();
+    pub fn get_by_id(
+        &self,
+        x: Id,
+        t: Option<DataTypes>,
+        b: Id
+    ) -> anyhow::Result<(Id, MinimizedIdHeader)> {
+        if b != Id::invalid() {
+            for header in self.bundles.get(&b).unwrap() {
+                if header.id == x {
+                    if let Some(a) = t {
+                        if header.type_id != a.as_id() {
+                            continue;
+                        }
+                    }
+                    return Ok((b, *header));
+                }
+            }
+            return Err(anyhow::anyhow!("id {} not found in cache for bundle {}", x, b));
+        }
         for (bundle, headers) in self.bundles.iter() {
             for header in headers {
                 if header.id == x {
+                    if let Some(a) = t {
+                        if header.type_id != a.as_id() {
+                            continue;
+                        }
+                    }
                     return Ok((*bundle, *header));
                 }
             }
@@ -380,227 +406,5 @@ impl BinRead for U32IdMap {
             materials.insert(index, id);
         }
         Ok(Self(materials))
-    }
-}
-
-#[derive(BinRead, Debug, Default)]
-pub struct UnitHeader {
-    #[br(seek_before = SeekFrom::Start(0x5C))]
-    pub lod_offset: u32,
-    #[br(seek_before = SeekFrom::Start(lod_offset.into()))]
-    pub lod_count: u32,
-
-    #[br(count = lod_count)] //, seek_before = SeekFrom::Start(lod_offset as u64 +4))]
-    pub offsets: Vec<u32>,
-
-    // #[br(seek_before = SeekFrom::Start(0x70))]
-    // pub material_offset: u32
-    #[br(seek_before = SeekFrom::Start(0x64))]
-    pub part_offset: u32,
-    #[br(seek_before = SeekFrom::Start(part_offset.into()))]
-    pub part_count: u32,
-    // #[br(count = part_count)]
-    // #[br(ignore)]
-    // pub part_indices: Vec<u32>,
-    #[br(seek_before = SeekFrom::Start(0x64))]
-    pub material_offset: u32,
-    // pub material_count: u32,
-
-    // #[br(ignore)]
-    #[br(seek_before = SeekFrom::Start(material_offset.into()))]
-    pub materials: U32IdMap,
-}
-
-#[derive(Default)]
-pub struct Mesh {
-    // pub header: ModelHeader,
-    pub parts: HashMap<i32, Vec<Part>>,
-    pub vertices: Vec<Vertex>,
-    // pub vert_pos: Vec<Vec<f32>>,
-    // pub vert_uv: Vec<Vec<f32>>,
-    // pub vert_norm: Vec<Vec<f32>>,
-    pub indices: Vec<Vec<u16>>,
-}
-
-#[derive(BinRead, Default, Debug)]
-pub struct PartDef {
-    pub index: i32,
-    pub vtx_offset: i32,
-    pub vtx_count: i32,
-    pub idx_offset: i32,
-    #[br(pad_after = 0x4)]
-    pub idx_count: i32,
-}
-
-#[derive(BinRead, Default, Debug)]
-pub struct Part {
-    pub id: u32,
-    pub def: PartDef,
-    pub material_id: Id,
-}
-
-#[derive(BinRead, Debug)]
-pub struct MeshLod {
-    pub vtx_count: u32,
-    pub stride: i32,
-    #[br(seek_before = SeekFrom::Current(0x20))]
-    pub idx_count: u32,
-    #[br(seek_before = SeekFrom::Current(0x14))]
-    pub vtx_offset: u32,
-    pub vtx_size: u32,
-    pub idx_offset: u32,
-    pub idx_size: u32,
-}
-
-#[derive(Debug, Default)]
-pub struct Vertex {
-    pub pos: Vector3,
-    pub uv: Vector2,
-    pub norm: Vector3,
-    pub col: Vector3,
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct UShortVector2 {
-    #[br(map = |x: u16| f32::from(x)/65535.0f32)]
-    pub x: f32,
-    #[br(map = |y: u16| f32::from(y)/65535.0f32)]
-    pub y: f32,
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct UShortVector3 {
-    pub x: u16,
-    pub y: u16,
-    pub z: u16,
-}
-
-impl From<UShortVector3> for Vector3 {
-    fn from(v: UShortVector3) -> Self {
-        Vector3 {
-            x: f32::from(v.x) / 65535.0,
-            y: f32::from(v.y) / 65535.0,
-            z: f32::from(v.z) / 65535.0,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct HalfVector2 {
-    #[br(map = |x: u16| f16::from_bits(x))]
-    pub x: f16,
-    #[br(map = |x: u16| f16::from_bits(x))]
-    pub y: f16,
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct Vector2 {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl From<HalfVector2> for Vector2 {
-    fn from(v: HalfVector2) -> Self {
-        Vector2 {
-            x: f32::from(v.x),
-            y: f32::from(v.y),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct U8Vector3 {
-    #[br(map = |x: u8| f32::from(x)/255.0)]
-    pub x: f32,
-    #[br(map = |x: u8| f32::from(x)/255.0)]
-    pub y: f32,
-    #[br(map = |x: u8| f32::from(x)/255.0)]
-    pub z: f32,
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct HalfVector3 {
-    #[br(map = |x: u16| f16::from_bits(x))]
-    pub x: f16,
-    #[br(map = |x: u16| f16::from_bits(x))]
-    pub y: f16,
-    #[br(map = |x: u16| f16::from_bits(x))]
-    pub z: f16,
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct Vector3 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl From<HalfVector3> for Vector3 {
-    fn from(v: HalfVector3) -> Self {
-        Vector3 {
-            x: f32::from(v.x),
-            y: f32::from(v.y),
-            z: f32::from(v.z),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(BinRead, Copy, Clone, Debug, Default)]
-pub struct Vector4 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub w: f32,
-}
-
-impl Vector4 {
-    pub fn magnitude(s: &Self) -> f32 {
-        (s.x * s.x + s.y * s.y + s.z * s.z + s.w * s.w).sqrt()
-    }
-
-    pub fn quat_to_euler(s: &Self) -> Vector3 {
-        let mut res = Vector3::default();
-        if Self::magnitude(s) - 1.0 < 0.01 {
-            // roll (x-axis rotation)
-            let sinr_cosp = 2.0 * (s.w * s.x + s.y * s.z);
-            let cosr_cosp = 1.0 - 2.0 * (s.x * s.x + s.y * s.y);
-            res.x = sinr_cosp.atan2(cosr_cosp);
-
-            // pitch (y-axis rotation)
-            let sinp = 2.0 * (s.w * s.y - s.z * s.x);
-            let abs_sinp = sinp.abs();
-            if abs_sinp >= 1.0 {
-                res.y = 90.0; // use 90 degrees if out of range
-            } else {
-                res.y = sinp.asin();
-            }
-
-            // yaw (z-axis rotation)
-            let siny_cosp = 2.0 * (s.w * s.z + s.x * s.y);
-            let cosy_cosp = 1.0 - 2.0 * (s.y * s.y + s.z * s.z);
-            res.z = siny_cosp.atan2(cosy_cosp);
-
-            // Rad to Deg
-            res.x *= 180.0 / PI;
-
-            if abs_sinp < 1.0 {
-                // only mult if within range
-                res.y *= 180.0 / PI;
-            }
-            res.z *= 180.0 / PI;
-        } else {
-            res.x = s.x;
-            res.y = s.y;
-            res.z = s.z;
-        }
-        res
     }
 }
