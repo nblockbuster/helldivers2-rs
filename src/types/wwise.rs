@@ -33,9 +33,10 @@ pub fn extract_bank(
         // let mut path_buf = vec![0u8;len as usize];
         // r.read_exact(&mut path_buf)?;
         let path_buf: NullString = r.read_ne()?;
+        
+        path = if path_buf.is_empty() { Some(d.unk_id.to_string()) } else { Some(path_buf.to_string()) };
 
-        path = Some(path_buf.to_string());
-
+        // path = Some(path_buf.to_string());
         let mut buf2 = vec![0u8; bnk_size as usize];
         c.read_exact(&mut buf2)?;
         buf2

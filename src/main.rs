@@ -93,6 +93,8 @@ pub fn main() -> anyhow::Result<()> {
         end.as_millis()
     );
 
+    std::fs::create_dir_all(&args.output_path)?;
+
     if args.selected_id.is_some() {
         // for (bundle, headers) in cache.bundles.iter() {
         //     for header in headers {

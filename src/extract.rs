@@ -332,17 +332,29 @@ pub fn export_special(
     //     let _ = std::fs::create_dir_all(&out_path);
     // }
     // out_path = out_path.join(format!("{}_{}", d.unk4c, d.unk_id));
-    let name = if let Some(file_name) = file_name {file_name} else {format!("{}_{}", d.unk4c, d.unk_id) };
-    println!("{:?}", name);
+    let name = if let Some(file_name) = file_name {
+        file_name
+    } else {
+        format!("{}_{}", d.unk4c, d.unk_id)
+    };
+    // println!("{:?}", name);
     out_path = out_path.join(name);
     out_path.set_extension(d.type_enum.extension());
-    if (out_path.is_dir() && !out_path.exists()) || (out_path.is_file() && !out_path.parent().unwrap().exists()) {
-        std::fs::create_dir_all(out_path.parent().unwrap())?;
-    }
-    // println!("{:?}", out_path);
-    let mut out_file = File::create(out_path)?;
+    // if (out_path.is_dir() && !out_path.exists())
+    //     || (out_path.is_file() && !out_path.parent().unwrap().exists())
+    // {
+    // }
+    let p = if out_path.is_dir() {
+        out_path.clone()
+    } else {
+        out_path.parent().unwrap().to_path_buf()
+    };
+    std::fs::create_dir_all(p)?;
+    
+    // println!("{:?}", &out_path);
+    
+    let mut out_file = File::create(&out_path)?;
     out_file.write_all(&out_buf)?;
 
     Ok(true)
 }
-
