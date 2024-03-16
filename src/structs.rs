@@ -18,35 +18,35 @@ pub enum DataTypes {
     Unknown = 0xFFFFFFFF_FFFFFFFF,
 
     #[value(name = "wem")]
-    WwiseWem = 0xE44215D_23554B50,
+    WwiseWem = 0x504b5523_5d21440e,
 
     #[value(name = "bnk")]
-    WwiseBNK = 0x99D750E6_D37B5A53,
+    WwiseBNK = 0x535A7BD3_E650D799,
 
     #[value(name = "havok1")]
-    Havok = 0xb8da80f2_c803725f,
+    Havok = 0x5F7203C8_F280DAB8,
 
     #[value(name = "havok2")]
-    Havok2 = 0x336bdb87_66bd591d,
+    Havok2 = 0x1D59BD66_87DB6B33,
 
     #[value(name = "texture")]
-    Texture = 0x329ec6a0_c63842cd,
+    Texture = 0xCD4238C6_A0C69E32,
 
     #[value(name = "model")]
-    Model = 0x3f45a7e9_0b8da4e0,
+    Model = 0xE0A48D0B_E9A7453F,
 
     // #[value(name = "string")]
-    String = 0xd30fb410_ab2b970d,
+    // String = 0xD972BAB_10B40FD3,
 
-    #[value(name = "entity")]
-    Entity = 0x7d080d3b_89ca3198,
+    // #[value(name = "entity")]
+    // Entity = 0x7d080d3b_89ca3198,
 
-    #[value(name = "material")]
-    Material = 0xDFDE6A87_97B4C0EA,
+    // #[value(name = "material")]
+    // Material = 0xDFDE6A87_97B4C0EA,
 
-    Skeleton = 0xe9726b05_01adde18,
+    // Skeleton = 0xe9726b05_01adde18,
 
-    AudioPath = 0x70B0F282_5C0932AF,
+    AudioPath = 0xAF32095C_82F2B070,
 }
 
 impl DataTypes {
@@ -264,7 +264,7 @@ impl BinRead for Id {
         _endian: binrw::Endian,
         (): Self::Args<'_>,
     ) -> binrw::BinResult<Self> {
-        let id = u64::read_options(reader, binrw::Endian::Big, ())?;
+        let id = u64::read_options(reader, binrw::Endian::Little, ())?;
         Ok(Id::new(id))
     }
 }
@@ -278,7 +278,7 @@ impl BinWrite for Id {
         _endian: binrw::Endian,
         (): Self::Args<'_>,
     ) -> binrw::BinResult<()> {
-        self._id.write_options(writer, binrw::Endian::Big, ())
+        self._id.write_options(writer, binrw::Endian::Little, ())
     }
 }
 
@@ -406,5 +406,30 @@ impl BinRead for U32IdMap {
             materials.insert(index, id);
         }
         Ok(Self(materials))
+    }
+}
+
+pub struct DataReaders(pub BufReader<File>, pub Option<BufReader<File>>, pub Option<BufReader<File>>);
+
+impl DataReaders {
+    pub fn new(r: BufReader<File>) -> Self {
+        DataReaders(r, None, None)
+    }
+
+    pub fn bundle(&mut self) -> &mut BufReader<File> {
+        &mut self.0
+    }
+    pub fn stream(&mut self) -> &mut Option<BufReader<File>> {
+        &mut self.1
+    }
+    pub fn gpu(&mut self) -> &mut Option<BufReader<File>> {
+        &mut self.2
+    }
+
+    pub fn set_stream(&mut self, r: BufReader<File>) {
+        self.1 = Some(r);
+    }
+    pub fn set_gpu(&mut self, r: BufReader<File>) {
+        self.2 = Some(r);
     }
 }

@@ -1,20 +1,20 @@
-use std::{fs::File, io::{BufReader, Read, Seek, SeekFrom}};
+use std::io::{Read, Seek, SeekFrom};
 
-use crate::DataHeader;
+use crate::{DataHeader, DataReaders};
 
 pub fn extract_texture(
     d: &mut DataHeader,
-    r: &mut BufReader<File>,
-    sf: &mut Option<BufReader<File>>,
-    gf: &mut Option<BufReader<File>>,
+    r: &mut DataReaders,
 ) -> Result<(Vec<u8>, Option<String>), anyhow::Error> {
     let mut out_buf: Vec<u8> = Vec::new();
+    let bundle = &mut r.bundle();
     // TODO: figure out what 0 -> c0 is for
-    r.seek(SeekFrom::Start(d.data_offset + 0xc0))?;
+    bundle.seek(SeekFrom::Start(d.data_offset + 0xc0))?;
     let mut dds_header = vec![0u8; 0x94];
-    r.read_exact(&mut dds_header)?;
+    bundle.read_exact(&mut dds_header)?;
     out_buf.extend_from_slice(&dds_header);
     if d.stream_data_size > 0 {
+        let sf = &mut r.stream();
         if sf.is_none() {
             return Err(anyhow::anyhow!("Stream file referenced but not found."));
         }
@@ -25,6 +25,7 @@ pub fn extract_texture(
             out_buf.extend_from_slice(&data);
         }
     } else {
+        let gf = &mut r.gpu();
         if gf.is_none() {
             return Err(anyhow::anyhow!(
                 "GPU Resource file referenced but not found."

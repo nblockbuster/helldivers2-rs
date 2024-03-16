@@ -2,6 +2,7 @@
 // Uses research and code done by MontagueM at https://github.com/MontagueM/helldivers2,
 // as well as from h3x3r and Xaymar at https://reshax.com/topic/507-helldivers-2-model-extraction-help
 pub mod extract;
+pub mod pndb;
 pub mod structs;
 pub mod types;
 
@@ -14,8 +15,8 @@ use std::{
     time::Instant,
 };
 
-use structs::*;
 use extract::*;
+use structs::*;
 
 #[macro_use]
 extern crate num_derive;
@@ -52,6 +53,10 @@ struct Args {
     /// Extract all files with x ID
     #[arg(short, value_enum)]
     selected_id: Option<String>,
+
+    /// Uses an assets.pndb file in the same location as the exe to apply names to files
+    #[arg(short, long)]
+    pndb: bool,
 }
 
 pub fn main() -> anyhow::Result<()> {
@@ -93,6 +98,12 @@ pub fn main() -> anyhow::Result<()> {
         end.as_millis()
     );
 
+    let mut namedb = pndb::Pndb::default();
+    if args.pndb {
+        namedb = pndb::read_pndb("assets.pndb")?;
+    }
+
+
     std::fs::create_dir_all(&args.output_path)?;
 
     if args.selected_id.is_some() {
@@ -105,7 +116,13 @@ pub fn main() -> anyhow::Result<()> {
         //     }
         // }
         // println!("id {:?} is in bundle {:?}", id, data.0);
-        return extract_single(&cache, &args.output_path, &args.data_path, Id::from(args.selected_id.unwrap()));
+        return extract_single(
+            &cache,
+            &args.output_path,
+            &args.data_path,
+            Id::from(args.selected_id.unwrap()),
+            &namedb
+        );
     }
 
     if args.extract_all {
@@ -121,7 +138,8 @@ pub fn main() -> anyhow::Result<()> {
                 &args.data_path,
                 &bundle_name.to_string(),
                 args.filetype,
-                args.one_folder
+                args.one_folder,
+                &namedb
             )?;
         }
         return Ok(());
@@ -135,7 +153,8 @@ pub fn main() -> anyhow::Result<()> {
         &args.data_path,
         &args.bundle_file.unwrap(),
         args.filetype,
-        args.one_folder
+        args.one_folder,
+        &namedb
     )?;
 
     Ok(())

@@ -1,17 +1,17 @@
-use std::{collections::HashMap, fs::File, io::{BufReader, Cursor, Read, Seek, SeekFrom, Write}};
+use std::{collections::HashMap, io::{BufReader, Cursor, Read, Seek, SeekFrom, Write}};
 
 use binrw::{BinRead, BinReaderExt};
 use half::f16;
 
-use crate::{DataHeader, Id, IdCache, U32IdMap};
+use crate::{DataHeader, DataReaders, Id, IdCache, U32IdMap};
 
 pub fn extract_model(
-    cache: &IdCache,
+    _cache: &IdCache,
     d: &mut DataHeader,
-    r: &mut BufReader<File>,
-    gf: &mut Option<BufReader<File>>,
+    readers: &mut DataReaders
 ) -> Result<(Vec<u8>, Option<String>), anyhow::Error> {
     let mut out_buf: Vec<u8> = Vec::new();
+    let r = readers.bundle();
     r.seek(SeekFrom::Start(d.data_offset))?;
     let mut data = vec![0u8; d.data_size.try_into().unwrap()];
     r.read_exact(&mut data)?;
@@ -63,6 +63,7 @@ pub fn extract_model(
 
         // let size = ml.vtx_count * ml.stride as u32;
         let mut data = vec![0u8; ml.vtx_size as usize];
+        let gf = readers.gpu();
         if gf.is_none() {
             panic!("GPU Resource file referenced but not found.");
         }

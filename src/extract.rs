@@ -16,6 +16,7 @@ pub fn extract_single(
     output_path: &String,
     data_path: &String,
     id: Id,
+    namedb: &crate::pndb::Pndb,
 ) -> anyhow::Result<()> {
     let (bundle_id, h) = cache.get_by_id(id, None, Id::invalid())?;
     let path = Path::new(data_path).join(bundle_id.to_string());
@@ -23,7 +24,7 @@ pub fn extract_single(
         return Err(anyhow::anyhow!("tried to open nonexistent file {:?}", path));
     }
     // println!("{:?}", path);
-    let mut reader = BufReader::new(File::open(path)?);
+    let reader = BufReader::new(File::open(path)?);
     let mut out_path = PathBuf::from(output_path); //.join(bundle_file);
 
     let mut stream_path = Path::new(&data_path).join(bundle_id.to_string());
@@ -46,14 +47,16 @@ pub fn extract_single(
         gpu_reader = Some(BufReader::new(file));
     }
     let mut d: DataHeader = h.into();
+
+    let mut readers: DataReaders = DataReaders(reader, stream_reader, gpu_reader);
+
     if export_special(
         cache,
         &Id::invalid(),
         &mut d,
-        &mut reader,
-        &mut stream_reader,
-        &mut gpu_reader,
+        &mut readers,
         &out_path,
+        namedb,
     )? {
         return Ok(());
     }
@@ -63,31 +66,31 @@ pub fn extract_single(
     let mut gpu_buf: Vec<u8> = Vec::new();
     if h.data_size != 0 {
         bundle_buf = vec![0u8; h.data_size as usize];
-        reader.seek(SeekFrom::Start(h.data_offset))?;
-        reader.read_exact(&mut bundle_buf)?;
+        readers.bundle().seek(SeekFrom::Start(h.data_offset))?;
+        readers.bundle().read_exact(&mut bundle_buf)?;
     }
     if h.stream_data_size != 0 && u64::from(h.stream_data_offset) < stream_size {
         stream_buf = vec![0u8; h.stream_data_size as usize];
-        if stream_reader.is_none() {
+        if readers.stream().is_none() {
             panic!(
                 "Stream file referenced but {:?} not found.",
                 stream_path.clone()
             );
         }
-        if let Some(ref mut sf_reader) = stream_reader {
+        if let Some(ref mut sf_reader) = readers.stream() {
             sf_reader.seek(SeekFrom::Start(h.stream_data_offset as u64))?;
             sf_reader.read_exact(&mut stream_buf)?;
         }
     }
     if h.gpu_data_size != 0 && h.gpu_data_offset < gpu_size {
         gpu_buf = vec![0u8; h.gpu_data_size as usize];
-        if gpu_reader.is_none() {
+        if readers.gpu().is_none() {
             panic!(
                 "GPU Resources referenced but {:?} not founh.",
                 gpu_path.clone()
             );
         }
-        if let Some(ref mut gpu_reader) = gpu_reader {
+        if let Some(ref mut gpu_reader) = readers.gpu() {
             gpu_reader.seek(SeekFrom::Start(h.gpu_data_size as u64))?;
             gpu_reader.read_exact(&mut gpu_buf)?;
         }
@@ -96,6 +99,9 @@ pub fn extract_single(
     let enum_type: DataTypes = num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
     let type_folder = format!("{:?}_{:x?}", enum_type, d.type_id);
     out_path = out_path.join(type_folder);
+    if namedb.name_database.contains_key(&d.unk_id) {
+        out_path = out_path.join(namedb.name_database.get(&d.unk_id).unwrap());
+    }
     if !out_path.exists() {
         let _ = std::fs::create_dir_all(&out_path);
     }
@@ -130,6 +136,7 @@ pub fn extract_files(
     bundle_file: &String,
     select_type: Option<DataTypes>,
     one_folder: bool,
+    namedb: &crate::pndb::Pndb,
 ) -> anyhow::Result<()> {
     let path = Path::new(data_path).join(bundle_file);
     if !path.exists() {
@@ -152,25 +159,29 @@ pub fn extract_files(
     let mut data_headers: Vec<DataHeader> = read_data_headers(&mut reader, &types)?;
     let mut stream_path = Path::new(&data_path).join(bundle_file);
     stream_path.set_extension("stream");
-
-    let mut stream_reader: Option<BufReader<File>> = None;
+    let stream_reader: Option<BufReader<File>>;
     let mut stream_size = 0;
+
+    let mut gpu_path = Path::new(&data_path).join(bundle_file);
+    gpu_path.set_extension("gpu_resources");
+    let gpu_reader: Option<BufReader<File>>;
+    let mut gpu_size = 0;
+
+    let mut readers = DataReaders::new(reader);
+
     if stream_path.exists() {
         let file = File::open(stream_path.clone())?;
         stream_size = file.metadata()?.len();
         stream_reader = Some(BufReader::new(file));
+        readers.set_stream(stream_reader.unwrap())
     }
-
-    let mut gpu_path = Path::new(&data_path).join(bundle_file);
-    gpu_path.set_extension("gpu_resources");
-
-    let mut gpu_reader: Option<BufReader<File>> = None;
-    let mut gpu_size = 0;
     if gpu_path.exists() {
         let file = File::open(gpu_path.clone())?;
         gpu_size = file.metadata()?.len();
         gpu_reader = Some(BufReader::new(file));
+        readers.set_gpu(gpu_reader.unwrap())
     }
+
     // println!("{:#?}", types_dict);
 
     for i in 0..data_headers.len() {
@@ -196,10 +207,9 @@ pub fn extract_files(
             cache,
             &Id::from(u64::from_str_radix(bundle_file, 16)?),
             d,
-            &mut reader,
-            &mut stream_reader,
-            &mut gpu_reader,
+            &mut readers,
             &out_path,
+            namedb,
         )? {
             // return Ok(());
             continue;
@@ -213,31 +223,31 @@ pub fn extract_files(
             if seek_pos + d.data_offset >= bundle_size {
                 continue;
             }
-            reader.seek(SeekFrom::Start(seek_pos))?;
-            reader.read_exact(&mut bundle_buf)?;
+            readers.bundle().seek(SeekFrom::Start(seek_pos))?;
+            readers.bundle().read_exact(&mut bundle_buf)?;
         }
         if d.stream_data_size != 0 && u64::from(d.stream_data_offset) < stream_size {
             stream_buf = vec![0u8; d.stream_data_size as usize];
-            if stream_reader.is_none() {
+            if readers.stream().is_none() {
                 panic!(
                     "Stream file referenced but {:?} not found.",
                     stream_path.clone()
                 );
             }
-            if let Some(ref mut sf_reader) = stream_reader {
+            if let Some(ref mut sf_reader) = readers.stream() {
                 sf_reader.seek(SeekFrom::Start(d.stream_data_offset as u64))?;
                 sf_reader.read_exact(&mut stream_buf)?;
             }
         }
         if d.gpu_data_size != 0 && d.gpu_data_offset < gpu_size {
             gpu_buf = vec![0u8; d.gpu_data_size as usize];
-            if gpu_reader.is_none() {
+            if readers.gpu().is_none() {
                 panic!(
                     "GPU Resources referenced but {:?} not found.",
                     gpu_path.clone()
                 );
             }
-            if let Some(ref mut gpu_reader) = gpu_reader {
+            if let Some(ref mut gpu_reader) = readers.gpu() {
                 gpu_reader.seek(SeekFrom::Start(d.gpu_data_size as u64))?;
                 gpu_reader.read_exact(&mut gpu_buf)?;
             }
@@ -247,6 +257,9 @@ pub fn extract_files(
             num::FromPrimitive::from_u64(d.type_id.into()).unwrap_or_default();
         let type_folder = format!("{:?}_{:x?}", enum_type, d.type_id);
         out_path = out_path.join(type_folder);
+        if namedb.name_database.contains_key(&d.unk_id) {
+            out_path = out_path.join(namedb.name_database.get(&d.unk_id).unwrap());
+        }
         if !out_path.exists() {
             let _ = std::fs::create_dir_all(&out_path);
         }
@@ -309,16 +322,15 @@ pub fn export_special(
     cache: &IdCache,
     bundle_id: &Id,
     d: &mut DataHeader,
-    r: &mut BufReader<File>,
-    sf: &mut Option<BufReader<File>>,
-    gf: &mut Option<BufReader<File>>,
+    readers: &mut DataReaders,
     out_path: &Path,
+    namedb: &crate::pndb::Pndb,
 ) -> anyhow::Result<bool> {
-    let (out_buf, file_name) = match d.type_enum {
-        DataTypes::Texture => crate::types::texture::extract_texture(d, r, sf, gf)?,
-        DataTypes::Model => crate::types::unit::extract_model(cache, d, r, gf)?,
-        DataTypes::WwiseBNK => crate::types::wwise::extract_bank(cache, bundle_id, d, r, sf)?,
-        DataTypes::WwiseWem => crate::types::wwise::extract_wem(d, r, sf)?,
+    let (out_buf, mut file_name) = match d.type_enum {
+        DataTypes::Texture => crate::types::texture::extract_texture(d, readers)?,
+        DataTypes::Model => crate::types::unit::extract_model(cache, d, readers)?,
+        DataTypes::WwiseBNK => crate::types::wwise::extract_bank(cache, bundle_id, d, readers)?,
+        DataTypes::WwiseWem => crate::types::wwise::extract_wem(d, readers)?,
         _ => {
             return Ok(false);
         }
@@ -332,6 +344,11 @@ pub fn export_special(
     //     let _ = std::fs::create_dir_all(&out_path);
     // }
     // out_path = out_path.join(format!("{}_{}", d.unk4c, d.unk_id));
+
+    if file_name.is_none() && namedb.name_database.contains_key(&d.unk_id) {
+        file_name = namedb.name_database.get(&d.unk_id).cloned();
+    }
+
     let name = if let Some(file_name) = file_name {
         file_name
     } else {
@@ -350,9 +367,9 @@ pub fn export_special(
         out_path.parent().unwrap().to_path_buf()
     };
     std::fs::create_dir_all(p)?;
-    
+
     // println!("{:?}", &out_path);
-    
+
     let mut out_file = File::create(&out_path)?;
     out_file.write_all(&out_buf)?;
 
