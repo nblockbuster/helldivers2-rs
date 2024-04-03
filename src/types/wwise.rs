@@ -23,14 +23,9 @@ pub fn extract_bank(
         let bnk_size: u32 = c.read_le()?;
         let id: Id = c.read_be()?;
 
-        let path_info = cache.get_by_id(id, Some(DataTypes::AudioPath), *bundle_id)?;
-        // println!("{} {:?}", bundle_id, path_info);
-        // println!("{:?}", path_info.1.data_offset + 8);
+        let path_info = cache.get_by_id(id, Some(DataTypes::WwiseDep), *bundle_id)?;
         bundle.seek(SeekFrom::Start(path_info.1.data_offset + 8))?;
-        // let len: u32 = r.read_le()?;
-        // let mut path_buf = vec![0u8;len as usize];
-        // r.read_exact(&mut path_buf)?;
-        let path_buf: NullString = bundle.read_ne()?;
+        let path_buf: NullString = bundle.read_le()?;
 
         path = if path_buf.is_empty() {
             Some(d.unk_id.to_string())
@@ -38,7 +33,6 @@ pub fn extract_bank(
             Some(path_buf.to_string())
         };
 
-        // path = Some(path_buf.to_string());
         let mut buf2 = vec![0u8; bnk_size as usize];
         c.read_exact(&mut buf2)?;
         buf2

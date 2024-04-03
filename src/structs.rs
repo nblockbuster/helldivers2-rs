@@ -23,20 +23,23 @@ pub enum DataTypes {
     #[value(name = "bnk")]
     WwiseBNK = 0x535A7BD3_E650D799,
 
-    #[value(name = "havok1")]
-    Havok = 0x5F7203C8_F280DAB8,
 
-    #[value(name = "havok2")]
-    Havok2 = 0x1D59BD66_87DB6B33,
+    // TODO: re-check these
+
+    // #[value(name = "havok1")]
+    // Havok = 0x5F7203C8_F280DAB8,
+
+    // #[value(name = "havok2")]
+    // Havok2 = 0x1D59BD66_87DB6B33,
 
     #[value(name = "texture")]
     Texture = 0xCD4238C6_A0C69E32,
 
-    #[value(name = "model")]
-    Model = 0xE0A48D0B_E9A7453F,
+    #[value(name = "unit")]
+    Unit = 0xE0A48D0B_E9A7453F,
 
-    // #[value(name = "string")]
-    // String = 0xD972BAB_10B40FD3,
+    #[value(name = "string")]
+    String = 0x0D972BAB_10B40FD3,
 
     // #[value(name = "entity")]
     // Entity = 0x7d080d3b_89ca3198,
@@ -46,7 +49,9 @@ pub enum DataTypes {
 
     // Skeleton = 0xe9726b05_01adde18,
 
-    AudioPath = 0xAF32095C_82F2B070,
+    WwiseDep = 0xAF32095C_82F2B070,
+    WwiseMetadata = 0xD50A8B7E_1C82B110,
+    WwiseProperties = 0x5FDD5FE3_91076F9F,
 }
 
 impl DataTypes {
@@ -54,9 +59,10 @@ impl DataTypes {
         match self {
             DataTypes::WwiseWem => "wem",
             DataTypes::WwiseBNK => "bnk",
-            DataTypes::Havok | DataTypes::Havok2 => "hkt",
+            // DataTypes::Havok | DataTypes::Havok2 => "hkt",
             DataTypes::Texture => "dds",
-            DataTypes::Model => "obj",
+            DataTypes::Unit => "obj",
+            DataTypes::String => "json",
             _ => "bin",
         }
     }

@@ -5,7 +5,7 @@ use half::f16;
 
 use crate::{DataHeader, DataReaders, Id, IdCache, U32IdMap};
 
-pub fn extract_model(
+pub fn extract_unit(
     _cache: &IdCache,
     d: &mut DataHeader,
     readers: &mut DataReaders

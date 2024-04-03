@@ -145,7 +145,6 @@ pub fn extract_files(
     // println!("{:?}", path);
     let f = File::open(path)?;
 
-    let bundle_size = f.metadata()?.len();
     let mut reader = BufReader::new(f);
 
     let header: Header = reader.read_le()?;
@@ -219,11 +218,12 @@ pub fn extract_files(
         let mut gpu_buf: Vec<u8> = Vec::new();
         if d.data_size != 0 {
             bundle_buf = vec![0u8; d.data_size as usize];
-            let seek_pos = d.data_offset + types_dict.get(&d.type_id).unwrap().unk10 as u64;
-            if seek_pos + d.data_offset >= bundle_size {
-                continue;
-            }
-            readers.bundle().seek(SeekFrom::Start(seek_pos))?;
+            // this is wrong, why did i do this
+            // let seek_pos = d.data_offset + types_dict.get(&d.type_id).unwrap().unk10 as u64;
+            // if seek_pos + d.data_offset >= bundle_size {
+            //     continue;
+            // }
+            readers.bundle().seek(SeekFrom::Start(d.data_offset))?;
             readers.bundle().read_exact(&mut bundle_buf)?;
         }
         if d.stream_data_size != 0 && u64::from(d.stream_data_offset) < stream_size {
@@ -322,15 +322,16 @@ pub fn export_special(
     cache: &IdCache,
     bundle_id: &Id,
     d: &mut DataHeader,
-    readers: &mut DataReaders,
+    r: &mut DataReaders,
     out_path: &Path,
     namedb: &crate::pndb::Pndb,
 ) -> anyhow::Result<bool> {
     let (out_buf, mut file_name) = match d.type_enum {
-        DataTypes::Texture => crate::types::texture::extract_texture(d, readers)?,
-        DataTypes::Model => crate::types::unit::extract_model(cache, d, readers)?,
-        DataTypes::WwiseBNK => crate::types::wwise::extract_bank(cache, bundle_id, d, readers)?,
-        DataTypes::WwiseWem => crate::types::wwise::extract_wem(d, readers)?,
+        DataTypes::Texture => crate::types::texture::extract_texture(d, r)?,
+        DataTypes::Unit => crate::types::unit::extract_unit(cache, d, r)?,
+        DataTypes::WwiseBNK => crate::types::wwise::extract_bank(cache, bundle_id, d, r)?,
+        DataTypes::WwiseWem => crate::types::wwise::extract_wem(d, r)?,
+        DataTypes::String => crate::types::string::extract_strings(d, r)?,
         _ => {
             return Ok(false);
         }
